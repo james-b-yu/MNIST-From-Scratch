@@ -54,6 +54,10 @@
 		"mutex": "cpp",
 		"thread": "cpp",
 		"dense": "cpp",
-		"complex": "cpp"
+		"complex": "cpp",
+		"list": "cpp",
+		"map": "cpp",
+		"iomanip": "cpp",
+		"core": "cpp"
 	}
 }

@@ -1,9 +1,12 @@
+#pragma once
+
 #include <boost/endian/conversion.hpp>
 #include <fstream>
 #include <memory>
 #include <string>
 
 #include "../image/image.h"
+#include "../image/image_reversed.h"
 
 class DataLoader
 {
@@ -32,4 +35,5 @@ class DataLoader
 
 	uint32_t _numImages;
 	std::shared_ptr<Image> getImage(size_t nthImage);
+	std::shared_ptr<ImageReversed> getImageReversed(size_t nthImage);
 };

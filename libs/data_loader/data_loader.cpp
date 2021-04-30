@@ -33,6 +33,9 @@ DataLoader::DataLoader(const std::string &imagesPath, const std::string &labelsP
 
 	_imageYSize = _ReadFromMSBBuffer<uint32_t>(8, _imagesBuffer);
 	_imageXSize = _ReadFromMSBBuffer<uint32_t>(12, _imagesBuffer);
+
+	_imagesFile.close();
+	_labelsFile.close();
 }
 
 DataLoader::~DataLoader()
@@ -47,7 +50,27 @@ DataLoader::~DataLoader()
 
 std::shared_ptr<Image> DataLoader::getImage(size_t nthImage) // beginning at n = 0
 {
-	// make a vector of pixels
+	// make a vector of pixels (between -1 and 1)
+	std::vector<double> pixels(_imageXSize * _imageYSize);
+	for (size_t i = 0; i < _imageXSize * _imageYSize; ++i) {
+		pixels[i] = (2 *
+					 static_cast<double>(
+						 _ReadFromMSBBuffer<uint8_t>(16 + nthImage * _imageXSize * _imageYSize + i, _imagesBuffer)) /
+					 255.0) -
+					1;
+	}
+
+	// get the label
+	unsigned short label = _ReadFromMSBBuffer<uint8_t>(8 + nthImage, _labelsBuffer);
+
+	return std::make_shared<Image>(
+		pixels, label, _imageXSize,
+		_imageYSize); // unfortunately, must return a copy due to necessity of changing edianness
+}
+
+std::shared_ptr<ImageReversed> DataLoader::getImageReversed(size_t nthImage) // beginning at n = 0
+{
+	// make a vector of pixels (between 0 and 1)
 	std::vector<double> pixels(_imageXSize * _imageYSize);
 	for (size_t i = 0; i < _imageXSize * _imageYSize; ++i) {
 		pixels[i] = static_cast<double>(
@@ -58,7 +81,7 @@ std::shared_ptr<Image> DataLoader::getImage(size_t nthImage) // beginning at n =
 	// get the label
 	unsigned short label = _ReadFromMSBBuffer<uint8_t>(8 + nthImage, _labelsBuffer);
 
-	return std::make_shared<Image>(
-		pixels, label, _imageXSize,
+	return std::make_shared<ImageReversed>(
+		label, pixels, _imageXSize,
 		_imageYSize); // unfortunately, must return a copy due to necessity of changing edianness
 }
