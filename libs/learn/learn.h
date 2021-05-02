@@ -10,6 +10,7 @@
 #include <deque>
 #include <eigen3/Eigen/Dense>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -65,8 +66,8 @@ template <typename T> class Learn
 		std::vector<Vec> _biasGradient;
 		double _accuracy;
 
-		CalculationResult(Vec &&outputLayer, double &&cost, std::vector<Mat> &&weightGradient,
-						  std::vector<Vec> &&biasGradient, double accuracy);
+		CalculationResult(Vec outputLayer, double cost, std::vector<Mat> weightGradient, std::vector<Vec> biasGradient,
+						  double accuracy);
 	};
 
 	CalculationResult EmptyResult();
@@ -87,6 +88,20 @@ template <typename T> class Learn
 	TestingResult predictIndividual(const std::shared_ptr<TrainingExample> &ex, bool print = true) const;
 
   private:
+	struct ThreadData {
+		std::vector<Vec> _layers;
+		std::vector<Vec> _layersLinear;
+		std::vector<Vec> _biases;
+		std::vector<Mat> _weights;
+		std::vector<Vec> _errorTerms;
+		std::vector<Mat> _weightGrad;
+		std::vector<Vec> _biasGrad;
+	};
+
+	mutable std::map<std::thread::id, std::shared_ptr<ThreadData>> _threadDataMap;
+
+	std::shared_ptr<ThreadData> _getThreadData(const std::thread::id &id) const;
+
 	size_t _numInputNodes;
 	size_t _numHiddenLayers;
 	size_t _numHiddenLayerNodes;
