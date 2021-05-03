@@ -10,7 +10,6 @@
 #include <deque>
 #include <eigen3/Eigen/Dense>
 #include <fstream>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -65,9 +64,10 @@ template <typename T> class Learn
 		std::vector<Mat> _weightGradient;
 		std::vector<Vec> _biasGradient;
 		double _accuracy;
+		double _singleCalculationSpeed;
 
-		CalculationResult(Vec outputLayer, double cost, std::vector<Mat> weightGradient, std::vector<Vec> biasGradient,
-						  double accuracy);
+		CalculationResult(Vec &&outputLayer, double &&cost, std::vector<Mat> &&weightGradient,
+						  std::vector<Vec> &&biasGradient, double accuracy, double singleCalculationSpeed);
 	};
 
 	CalculationResult EmptyResult();
@@ -88,20 +88,6 @@ template <typename T> class Learn
 	TestingResult predictIndividual(const std::shared_ptr<TrainingExample> &ex, bool print = true) const;
 
   private:
-	struct ThreadData {
-		std::vector<Vec> _layers;
-		std::vector<Vec> _layersLinear;
-		std::vector<Vec> _biases;
-		std::vector<Mat> _weights;
-		std::vector<Vec> _errorTerms;
-		std::vector<Mat> _weightGrad;
-		std::vector<Vec> _biasGrad;
-	};
-
-	mutable std::map<std::thread::id, std::shared_ptr<ThreadData>> _threadDataMap;
-
-	std::shared_ptr<ThreadData> _getThreadData(const std::thread::id &id) const;
-
 	size_t _numInputNodes;
 	size_t _numHiddenLayers;
 	size_t _numHiddenLayerNodes;
@@ -142,7 +128,7 @@ template <typename T> class Learn
 
 	std::deque<std::shared_ptr<TrainingExample>> _exampleQueue;
 	std::vector<CalculationResult> _threadResults;
-	CalculationResult _previousIterationAverage = CalculationResult({}, 0.0, {}, {}, 0.0);
+	CalculationResult _previousIterationAverage = CalculationResult({}, 0.0, {}, {}, 0.0, 0.0);
 	std::condition_variable _threadResultsConditionVariable;
 
 	std::chrono::system_clock::time_point _beginningOfEpochOrTest = std::chrono::system_clock::now();
@@ -150,7 +136,7 @@ template <typename T> class Learn
 
 	std::vector<std::shared_ptr<TrainingExample>> _trainingExamples;
 	std::vector<std::shared_ptr<TrainingExample>> _testingExamples;
-	CalculationResult _testingAverage = CalculationResult({}, 0.0, {}, {}, 0.0);
+	CalculationResult _testingAverage = CalculationResult({}, 0.0, {}, {}, 0.0, 0.0);
 
 	size_t _concurrency = 2;
 	size_t _batchSizePerThread = 20;
