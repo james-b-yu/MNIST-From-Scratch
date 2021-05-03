@@ -20,12 +20,52 @@ Learn<T>::TrainingExample::TrainingExample(std::vector<double> &&input, std::vec
 
 template <typename T>
 Learn<T>::CalculationResult::CalculationResult(Vec &&outputLayer, double &&cost, std::vector<Mat> &&weightGradient,
-											   std::vector<Vec> &&biasGradient, double accuracy,
-											   double singleCalculationSpeed)
+											   std::vector<Vec> &&biasGradient, double &&accuracy,
+											   double &&singleCalculationSpeed)
 	: _outputLayer(std::move(outputLayer)), _cost(std::move(cost)), _weightGradient(std::move(weightGradient)),
 	  _biasGradient(std::move(biasGradient)), _accuracy(std::move(accuracy)),
-	  _singleCalculationSpeed(singleCalculationSpeed)
+	  _singleCalculationSpeed(std::move(singleCalculationSpeed))
 {
+}
+
+template <typename T>
+Learn<T>::CalculationResult::CalculationResult(const Vec &outputLayer, const double &cost,
+											   const std::vector<Mat> &weightGradient,
+											   const std::vector<Vec> &biasGradient, const double &accuracy,
+											   const double &singleCalculationSpeed)
+	: _outputLayer(outputLayer), _cost(cost), _weightGradient(weightGradient), _biasGradient(biasGradient),
+	  _accuracy(accuracy), _singleCalculationSpeed(singleCalculationSpeed)
+{
+}
+
+template <typename T> Learn<T>::CalculationResult::CalculationResult(CalculationResult &&r)
+{
+	_outputLayer = std::move(r._outputLayer);
+	_cost = std::move(r._cost);
+	_weightGradient = std::move(r._weightGradient);
+	_biasGradient = std::move(r._biasGradient);
+	_accuracy = std::move(r._accuracy);
+	_singleCalculationSpeed = std::move(r._singleCalculationSpeed);
+}
+
+template <typename T> void Learn<T>::CalculationResult::operator=(CalculationResult &&r)
+{
+	_outputLayer = std::move(r._outputLayer);
+	_cost = std::move(r._cost);
+	_weightGradient = std::move(r._weightGradient);
+	_biasGradient = std::move(r._biasGradient);
+	_accuracy = std::move(r._accuracy);
+	_singleCalculationSpeed = std::move(r._singleCalculationSpeed);
+}
+
+template <typename T> void Learn<T>::CalculationResult::operator=(const CalculationResult &r)
+{
+	_outputLayer = r._outputLayer;
+	_cost = r._cost;
+	_weightGradient = r._weightGradient;
+	_biasGradient = r._biasGradient;
+	_accuracy = r._accuracy;
+	_singleCalculationSpeed = r._singleCalculationSpeed;
 }
 
 template <typename T> typename Learn<T>::CalculationResult Learn<T>::EmptyResult()
@@ -151,18 +191,24 @@ typename Learn<T>::CalculationResult Learn<T>::_calculateIndividual(std::shared_
 		throw std::invalid_argument("training example has wrong number of input or output nodes");
 	}
 
-	auto layers = _initializeLikeLayers(ex->_input);
-	auto layersLinear = _initializeLikeLayers(ex->_input);
+	Vec inputLayer = Eigen::Map<Vec, Eigen::Unaligned>(ex->_input.data(), _numInputNodes);
+
+	auto &threadWorkerData = _threadWorkerData[_getThreadIndex()];
+
+	threadWorkerData._layers[0] = inputLayer;
+	threadWorkerData._layersLinear[0] = inputLayer;
+
 	for (size_t k = 1; k < _numLayers; ++k) {
-		layersLinear[k] = _trainingState._weights[k] * layers[k - 1] + _trainingState._biases[k];
+		threadWorkerData._layersLinear[k] =
+			_trainingState._weights[k] * threadWorkerData._layers[k - 1] + _trainingState._biases[k];
 		if (k + 1 != _numLayers)
-			layers[k] = layersLinear[k].unaryExpr(&Learn::_scalingFunc);
+			threadWorkerData._layers[k] = threadWorkerData._layersLinear[k].unaryExpr(&Learn::_scalingFunc);
 		else
-			layers[k] = layersLinear[k].unaryExpr(&Learn::_scalingFuncOutput);
+			threadWorkerData._layers[k] = threadWorkerData._layersLinear[k].unaryExpr(&Learn::_scalingFuncOutput);
 	}
 
-	Vec outputLayer = layers.back();
-	Vec outputLayerLinear = layersLinear.back();
+	Vec &outputLayer = threadWorkerData._layers.back();
+	Vec &outputLayerLinear = threadWorkerData._layersLinear.back();
 
 	Vec expectedOutputLayer = Eigen::Map<Vec, Eigen::Unaligned>(ex->_expectedOutput.data(), _numOutputNodes);
 	std::vector<double> stdOutputLayer =
@@ -171,35 +217,32 @@ typename Learn<T>::CalculationResult Learn<T>::_calculateIndividual(std::shared_
 	double cost = outputLayer.binaryExpr(expectedOutputLayer, &Learn::_costFunc).sum();
 
 	// backwards calculation
-	std::vector<Vec> errorTerms = _initializeLikeLayers({});
-
 	// final layer's error terms
-	errorTerms[_numLayers - 1] = outputLayer.binaryExpr(expectedOutputLayer, &Learn::_dCostFunc)
-									 .cwiseProduct(outputLayerLinear.unaryExpr(&Learn::_dScalingFuncOutput));
+	threadWorkerData._errorTerms[_numLayers - 1] =
+		outputLayer.binaryExpr(expectedOutputLayer, &Learn::_dCostFunc)
+			.cwiseProduct(outputLayerLinear.unaryExpr(&Learn::_dScalingFuncOutput));
 
 	// previous layers' error terms
 	for (size_t k = _numLayers - 2; k > 0; --k) {
-		errorTerms[k] = (_trainingState._weights[k + 1].transpose() * errorTerms[k + 1])
-							.cwiseProduct(layersLinear[k].unaryExpr(&Learn::_dScalingFunc));
+		threadWorkerData._errorTerms[k] =
+			(_trainingState._weights[k + 1].transpose() * threadWorkerData._errorTerms[k + 1])
+				.cwiseProduct(threadWorkerData._layersLinear[k].unaryExpr(&Learn::_dScalingFunc));
 	}
 
 	// get weight grad
-	std::vector<Mat> weightGrad = _initializeLikeWeights();
 	for (size_t k = 1; k < _numLayers; ++k) {
-		weightGrad[k] = errorTerms[k] * layers[k - 1].transpose();
+		threadWorkerData._weightGrad[k] = threadWorkerData._errorTerms[k] * threadWorkerData._layers[k - 1].transpose();
 	}
 
 	// bias grad is the same
-	std::vector<Vec> biasGrad = std::move(errorTerms);
+	std::vector<Vec> &biasGrad = threadWorkerData._errorTerms;
 
 	// get accuracy, which for now is either 0 or 1
 	double accuracy = ex->calculateAbsoluteAccuracy(stdOutputLayer);
 	auto singleCalculationSpeed = 1.0 / std::chrono::duration<double>(std::chrono::system_clock::now() - now).count();
 
-	return CalculationResult(std::move(outputLayer), std::move(cost), std::move(weightGrad), std::move(biasGrad),
-							 std::move(accuracy), std::move(singleCalculationSpeed));
-
-	// return CalculationResult({}, 0.0, {}, {}, 0.0);
+	return CalculationResult(outputLayer, cost, threadWorkerData._weightGrad, biasGrad, accuracy,
+							 singleCalculationSpeed);
 }
 
 template <typename T> double Learn<T>::_scalingFunc(const double &v)
@@ -253,40 +296,44 @@ template <typename T> double Learn<T>::_dCostFunc(const double &c, const double 
 // }
 
 template <typename T>
-typename Learn<T>::CalculationResult Learn<T>::_getAverageFromResults(const std::vector<CalculationResult> &res) const
+typename Learn<T>::CalculationResult Learn<T>::_getAverageFromResults(
+	const typename std::vector<CalculationResult>::iterator &begin,
+	const typename std::vector<CalculationResult>::iterator &end) const
 {
+	const size_t resSize = end - begin;
+
 	// get average cost and accuracy
 	double cost = 0.0;
 	double accuracy = 0.0;
 	double singleCalculationSpeed = 0.0;
-	for (const auto &r : res) {
-		cost += r._cost;
-		accuracy += r._accuracy;
-		singleCalculationSpeed += r._singleCalculationSpeed;
+	for (auto it = begin; it != end; ++it) {
+		cost += it->_cost;
+		accuracy += it->_accuracy;
+		singleCalculationSpeed += it->_singleCalculationSpeed;
 	}
-	cost /= res.size();
-	accuracy /= res.size();
-	singleCalculationSpeed /= res.size();
+	cost /= resSize;
+	accuracy /= resSize;
+	singleCalculationSpeed /= resSize;
 
 	// get average weight and bias gradient
 	std::vector<Mat> weightGradient = _initializeLikeWeights();
 	std::vector<Vec> biasGradient = _initializeLikeBiases();
 
-	for (const auto &r : res) {
-		for (size_t k = 1; k < r._weightGradient.size(); ++k) {
-			weightGradient[k] += r._weightGradient[k];
+	for (auto it = begin; it != end; ++it) {
+		for (size_t k = 1; k < it->_weightGradient.size(); ++k) {
+			weightGradient[k] += it->_weightGradient[k];
 		}
-		for (size_t k = 1; k < r._biasGradient.size(); ++k) {
-			biasGradient[k] += r._biasGradient[k];
+		for (size_t k = 1; k < it->_biasGradient.size(); ++k) {
+			biasGradient[k] += it->_biasGradient[k];
 		}
 	}
 
 	for (auto &i : weightGradient) {
-		i /= res.size();
+		i /= resSize;
 	}
 
 	for (auto &i : biasGradient) {
-		i /= res.size();
+		i /= resSize;
 	}
 
 	return CalculationResult({}, std::move(cost), std::move(weightGradient), std::move(biasGradient),
@@ -297,14 +344,13 @@ template <typename T>
 typename Learn<T>::CalculationResult Learn<T>::_calculateMultiple(
 	std::vector<std::shared_ptr<TrainingExample>> exs) const
 {
-	std::vector<CalculationResult> res;
-	for (const auto &i : exs) {
-		res.push_back(_calculateIndividual(i));
-	}
-	// std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	auto a = _getAverageFromResults(res);
 
-	return a;
+	for (size_t i = 0; i < exs.size(); ++i) {
+		_threadIndividualResultStorage[_getThreadIndex()][i] = _calculateIndividual(exs[i]);
+	}
+
+	return _getAverageFromResults(_threadIndividualResultStorage[_getThreadIndex()].begin(),
+								  _threadIndividualResultStorage[_getThreadIndex()].begin() + exs.size());
 }
 
 template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExample>> Learn<T>::_getNextExamples()
@@ -318,7 +364,7 @@ template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExa
 		std::unique_lock<std::mutex> resultLock(_threadResultsMutex);
 		_threadResultsConditionVariable.wait(resultLock, [&]() { // cv will get notified every time a result gets pushed
 			// std::cout << "should not get callled alll the itme" << std::endl;
-			return this->_threadResults.size() == _threadsTaken; // so wait until all results have arrived
+			return this->_threadsFinished == _threadsTaken; // so wait until all results have arrived
 		});
 
 		// all results have now arrived, so find average gradient and learn
@@ -330,7 +376,8 @@ template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExa
 		// auto timeElapsed = std::chrono::duration<double, std::milli>(now - _lastIteration).count();
 		// _lastIteration = now;
 
-		CalculationResult average = _getAverageFromResults(_threadResults);
+		CalculationResult average =
+			_getAverageFromResults(_threadResults.begin(), _threadResults.begin() + _threadsFinished);
 
 		if (!_testingMode) {
 			_epochAccuracy = _epochAccuracy == 0.0 ? average._accuracy : 0.9 * _epochAccuracy + 0.1 * average._accuracy;
@@ -370,7 +417,8 @@ template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExa
 
 		// reset thread counters
 		_threadsTaken = 0;
-		_threadResults.clear();
+		_threadsFinished = 0;
+		// _threadResults.clear();
 
 		// toggle between testing and training modes
 		if (numRemainingExamples == 0)
@@ -382,10 +430,12 @@ template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExa
 	// not all threads have been taken up
 	_threadsTaken++;
 	if (numRemainingExamples == 0 && !_testingMode) { // ended testing stage of epoch; new epoch
-		_trainingState._testingReport.push_back(
-			{_testingAverage._cost, _testingAverage._accuracy, _trainingState._epochNumber}); // add report
-		if (_trainingState._epochNumber != 0)
-			saveLayerConnections(); // save state
+
+		if (!_initializing) { // do not call this on boot up
+			_trainingState._testingReport.push_back(
+				{_testingAverage._cost, _testingAverage._accuracy, _trainingState._epochNumber}); // add report
+			saveLayerConnections();																  // save state
+		}
 
 		_previousIterationAverage = EmptyResult();
 		_trainingState._epochNumber++;
@@ -400,10 +450,11 @@ template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExa
 		// use time-based learning schedule
 		_trainingState._learningRate = _trainingState._learningRate / (1.0 + _decay * _trainingState._epochNumber);
 		_beginningOfEpochOrTest = std::chrono::system_clock::now();
+
+		_initializing = false;
 	} else if (numRemainingExamples == 0 && _testingMode) { // ended training stage of epoch
-		_testingAverage = CalculationResult({}, 0.0, {}, {}, 0.0, 0.0);
+		_testingAverage = EmptyResult();
 		_epochIterations = 0;
-		_threadResults.clear();
 		_exampleQueue = std::deque<std::shared_ptr<TrainingExample>>(_testingExamples.begin(), _testingExamples.end());
 		numRemainingExamples = this->_testingExamples.size();
 		_beginningOfEpochOrTest = std::chrono::system_clock::now();
@@ -425,7 +476,7 @@ template <typename T> void Learn<T>::_threadWorkerFunc(size_t epochs)
 		auto results = _calculateMultiple(nextExamples);
 
 		std::unique_lock<std::mutex> resultsLock(_threadResultsMutex);
-		_threadResults.push_back(std::move(results));
+		_threadResults[_threadsFinished++] = std::move(results);
 		_threadResultsConditionVariable.notify_one();
 	}
 }
@@ -433,6 +484,34 @@ template <typename T> void Learn<T>::_threadWorkerFunc(size_t epochs)
 template <typename T> void Learn<T>::train(size_t epochs)
 {
 	std::vector<std::thread> threads;
+
+	for (size_t i = 0; i < _concurrency; ++i) {
+		std::vector<CalculationResult> individualResultStorage;
+		for (size_t j = 0; j < _batchSizePerThread; ++j) {
+			individualResultStorage.push_back(std::move(EmptyResult()));
+		}
+		_threadIndividualResultStorage.push_back(std::move(individualResultStorage));
+	}
+
+	for (size_t i = 0; i < _concurrency; ++i) {
+		_threadResults.push_back(std::move(EmptyResult()));
+	}
+
+	for (size_t i = 0; i < _concurrency; ++i) {
+		// create blank thread data
+		ThreadData td;
+		std::vector<double> blankInputLayer(_numInputNodes);
+
+		td._layers = _initializeLikeLayers(blankInputLayer);
+		td._layersLinear = _initializeLikeLayers(blankInputLayer);
+		td._biases = _initializeLikeBiases();
+		td._weights = _initializeLikeWeights();
+		td._errorTerms = _initializeLikeLayers(blankInputLayer);
+		td._weightGrad = _initializeLikeWeights();
+		td._biasGrad = _initializeLikeBiases();
+
+		_threadWorkerData.push_back(std::move(td));
+	}
 
 	for (size_t t = 0; t < _concurrency; ++t) {
 		threads.push_back(std::thread(&Learn::_threadWorkerFunc, this, epochs));
@@ -512,6 +591,18 @@ typename Learn<T>::TestingResult Learn<T>::predictIndividual(const std::shared_p
 			  << "Confidence: " << res.confidence << std::endl;
 
 	return res;
+}
+
+template <typename T> size_t Learn<T>::_getThreadIndex() const
+{
+	std::thread::id id = std::this_thread::get_id();
+
+	static size_t currentIndex = 0;
+	if (_threadIndices.find(id) == _threadIndices.end()) {
+		_threadIndices.insert(std::pair<std::thread::id, size_t>(id, currentIndex++));
+	}
+
+	return _threadIndices[id];
 }
 
 template class Learn<std::string>;

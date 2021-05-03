@@ -10,6 +10,8 @@
 #include <deque>
 #include <eigen3/Eigen/Dense>
 #include <fstream>
+#include <iostream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -67,7 +69,15 @@ template <typename T> class Learn
 		double _singleCalculationSpeed;
 
 		CalculationResult(Vec &&outputLayer, double &&cost, std::vector<Mat> &&weightGradient,
-						  std::vector<Vec> &&biasGradient, double accuracy, double singleCalculationSpeed);
+						  std::vector<Vec> &&biasGradient, double &&accuracy, double &&singleCalculationSpeed);
+
+		CalculationResult(const Vec &outputLayer, const double &cost, const std::vector<Mat> &weightGradient,
+						  const std::vector<Vec> &biasGradient, const double &accuracy,
+						  const double &singleCalculationSpeed);
+
+		CalculationResult(CalculationResult &&);
+		void operator=(CalculationResult &&);
+		void operator=(const CalculationResult &);
 	};
 
 	CalculationResult EmptyResult();
@@ -88,6 +98,16 @@ template <typename T> class Learn
 	TestingResult predictIndividual(const std::shared_ptr<TrainingExample> &ex, bool print = true) const;
 
   private:
+	struct ThreadData {
+		std::vector<Vec> _layers;
+		std::vector<Vec> _layersLinear;
+		std::vector<Vec> _biases;
+		std::vector<Mat> _weights;
+		std::vector<Vec> _errorTerms;
+		std::vector<Mat> _weightGrad;
+		std::vector<Vec> _biasGrad;
+	};
+
 	size_t _numInputNodes;
 	size_t _numHiddenLayers;
 	size_t _numHiddenLayerNodes;
@@ -95,6 +115,8 @@ template <typename T> class Learn
 	size_t _numLayers;
 	double _decay;
 	double _momentum;
+
+	bool _initializing = true;
 
 	// std::vector<Mat> _weights;
 	// std::vector<Vec> _biases;
@@ -112,7 +134,8 @@ template <typename T> class Learn
 	static double _dCostFunc(const double &c, const double &e);
 
 	// static double _costFunc(const Vec &c, const Vec &e);
-	CalculationResult _getAverageFromResults(const std::vector<CalculationResult> &res) const;
+	CalculationResult _getAverageFromResults(const typename std::vector<CalculationResult>::iterator &begin,
+											 const typename std::vector<CalculationResult>::iterator &end) const;
 
 	// THREADING!!
 	std::mutex _exampleQueueMutex;
@@ -123,6 +146,7 @@ template <typename T> class Learn
 
 	std::vector<std::shared_ptr<TrainingExample>> _getNextExamples();
 	size_t _threadsTaken = 0;
+	size_t _threadsFinished = 0;
 
 	void _threadWorkerFunc(size_t epochs);
 
@@ -146,6 +170,11 @@ template <typename T> class Learn
 
 	CalculationResult _calculateIndividual(std::shared_ptr<TrainingExample> ex) const;
 	CalculationResult _calculateMultiple(std::vector<std::shared_ptr<TrainingExample>> exs) const;
+
+	mutable std::map<std::thread::id, size_t> _threadIndices;
+	mutable std::vector<std::vector<CalculationResult>> _threadIndividualResultStorage;
+	mutable std::vector<ThreadData> _threadWorkerData;
+	size_t _getThreadIndex() const;
 };
 
 namespace boost

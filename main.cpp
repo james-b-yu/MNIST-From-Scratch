@@ -25,7 +25,7 @@ int main(int, char **)
 		testingExamples.push_back(testLoader.getImage(i));
 	}
 
-	Learn<double> l(28 * 28, 3, 512, 10, 0.01, 0.001, 0.8, std::move(trainingExamples), std::move(testingExamples), 10,
+	Learn<double> l(28 * 28, 3, 512, 10, 0.01, 0.001, 0.8, std::move(trainingExamples), std::move(testingExamples), 2,
 					16, "save-file.txt");
 
 	try {
