@@ -85,3 +85,23 @@ std::shared_ptr<ImageReversed> DataLoader::getImageReversed(size_t nthImage) // 
 		label, pixels, _imageXSize,
 		_imageYSize); // unfortunately, must return a copy due to necessity of changing edianness
 }
+
+std::shared_ptr<Character> DataLoader::getCharacter(size_t nthImage) // beginning at n = 0
+{
+	// make a vector of pixels (between -1 and 1)
+	std::vector<double> pixels(_imageXSize * _imageYSize);
+	for (size_t i = 0; i < _imageXSize * _imageYSize; ++i) {
+		pixels[i] = (2 *
+					 static_cast<double>(
+						 _ReadFromMSBBuffer<uint8_t>(16 + nthImage * _imageXSize * _imageYSize + i, _imagesBuffer)) /
+					 255.0) -
+					1;
+	}
+
+	// get the label
+	unsigned short label = _ReadFromMSBBuffer<uint8_t>(8 + nthImage, _labelsBuffer);
+
+	return std::make_shared<Character>(
+		pixels, label, _imageXSize,
+		_imageYSize); // unfortunately, must return a copy due to necessity of changing edianness
+}

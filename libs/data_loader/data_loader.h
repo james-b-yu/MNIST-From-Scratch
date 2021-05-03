@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+#include "../image/character.h"
 #include "../image/image.h"
 #include "../image/image_reversed.h"
 
@@ -35,5 +36,6 @@ class DataLoader
 
 	uint32_t _numImages;
 	std::shared_ptr<Image> getImage(size_t nthImage);
+	std::shared_ptr<Character> getCharacter(size_t nthImage);
 	std::shared_ptr<ImageReversed> getImageReversed(size_t nthImage);
 };

@@ -43,10 +43,10 @@ template <typename T> class Learn
 		std::vector<double> _input;
 		std::vector<double> _expectedOutput;
 
-		virtual std::string toString() const;
-		virtual double calculateAbsoluteAccuracy(const std::vector<double> &calculatedOutput) const;
-		virtual double calculateConfidence(const std::vector<double> &calculatedOutput) const;
-		virtual T interpretOutput(const std::vector<double> &output) const;
+		virtual std::string toString() const = 0;
+		virtual double calculateAbsoluteAccuracy(const std::vector<double> &calculatedOutput) const = 0;
+		virtual double calculateConfidence(const std::vector<double> &calculatedOutput) const = 0;
+		virtual T interpretOutput(const std::vector<double> &output) const = 0;
 
 		TrainingExample(const std::vector<double> &input, const std::vector<double> expectedOutput);
 		TrainingExample(std::vector<double> &&input, std::vector<double> &&expectedOutput);

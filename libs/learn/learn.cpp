@@ -97,6 +97,32 @@ Learn<T>::Learn(size_t numInputNodes, size_t numHiddenLayers, size_t numHiddenLa
 	_trainingState._weights = _initializeLikeWeights();
 	_trainingState._biases = _initializeLikeBiases();
 	_trainingState._learningRate = learningRate;
+
+	// initialize multithreading data pool
+
+	for (size_t i = 0; i < _concurrency + 1; ++i) {
+		std::vector<CalculationResult> individualResultStorage;
+		for (size_t j = 0; j < _batchSizePerThread; ++j) {
+			individualResultStorage.push_back(std::move(EmptyResult()));
+		}
+		_threadIndividualResultStorage.push_back(std::move(individualResultStorage));
+
+		_threadResults.push_back(std::move(EmptyResult()));
+
+		// create blank thread data
+		ThreadData td;
+		std::vector<double> blankInputLayer(_numInputNodes);
+
+		td._layers = _initializeLikeLayers(blankInputLayer);
+		td._layersLinear = _initializeLikeLayers(blankInputLayer);
+		td._biases = _initializeLikeBiases();
+		td._weights = _initializeLikeWeights();
+		td._errorTerms = _initializeLikeLayers(blankInputLayer);
+		td._weightGrad = _initializeLikeWeights();
+		td._biasGrad = _initializeLikeBiases();
+
+		_threadWorkerData.push_back(std::move(td));
+	}
 }
 
 template <typename T> std::vector<Mat> Learn<T>::_initializeLikeWeights() const
@@ -158,7 +184,7 @@ template <typename T> void Learn<T>::setRandomLayerConnections()
 		for (Eigen::Index i = 0; i < k.rows(); ++i) {
 			for (Eigen::Index j = 0; j < k.cols(); ++j) {
 				double r = std::sqrt(6.0 / (k.cols() + k.rows()));
-				std::uniform_real_distribution<double> dist(-r, r);
+				std::uniform_real_distribution<double> dist(-0.5 * r, 0.5 * r);
 				k(i, j) = dist(generator);
 			}
 		}
@@ -247,12 +273,14 @@ typename Learn<T>::CalculationResult Learn<T>::_calculateIndividual(std::shared_
 
 template <typename T> double Learn<T>::_scalingFunc(const double &v)
 {
+	return v;
 	return std::max(v, 0.0); // use relu
 	return tanh(v);			 // use sigmoid between -1 and 1
 }
 
 template <typename T> double Learn<T>::_dScalingFunc(const double &v)
 {
+	return 1;
 	if (v > 0) // use relu
 		return 1;
 	else
@@ -262,11 +290,13 @@ template <typename T> double Learn<T>::_dScalingFunc(const double &v)
 
 template <typename T> double Learn<T>::_scalingFuncOutput(const double &v)
 {
+	return v;
 	return 0.5 * (1.0 + std::tanh(v)); // sigmoid between 0 and 1
 }
 
 template <typename T> double Learn<T>::_dScalingFuncOutput(const double &v)
 {
+	return 1;
 	return 0.5 / (std::pow(std::cosh(v), 2)); // sigmoid between 0 and 1
 }
 
@@ -382,6 +412,7 @@ template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExa
 		if (!_testingMode) {
 			_epochAccuracy = _epochAccuracy == 0.0 ? average._accuracy : 0.9 * _epochAccuracy + 0.1 * average._accuracy;
 
+			// if (numRemainingExamples % 1000 == 0)
 			std::cout << "epoch " << _trainingState._epochNumber << " cost " << average._cost << " accuracy "
 					  << average._accuracy << " epoch accuracy " << _epochAccuracy << " remaining "
 					  << numRemainingExamples << " speed " << speed << " single speed "
@@ -410,6 +441,8 @@ template <typename T> std::vector<std::shared_ptr<typename Learn<T>::TrainingExa
 				(_epochIterations * _testingAverage._cost + average._cost) / static_cast<double>(_epochIterations + 1);
 			_testingAverage._accuracy = (_epochIterations * _testingAverage._accuracy + average._accuracy) /
 										static_cast<double>(_epochIterations + 1);
+
+			// if (numRemainingExamples % 1000 == 0)
 			std::cout << "epoch " << _trainingState._epochNumber << " testing cost " << _testingAverage._cost
 					  << " accuracy " << _testingAverage._accuracy << " remaining " << numRemainingExamples << " speed "
 					  << speed << " single speed " << _testingAverage._singleCalculationSpeed << "\n";
@@ -483,35 +516,9 @@ template <typename T> void Learn<T>::_threadWorkerFunc(size_t epochs)
 
 template <typename T> void Learn<T>::train(size_t epochs)
 {
+	_threadIndices.clear(); // reset thread indices
+
 	std::vector<std::thread> threads;
-
-	for (size_t i = 0; i < _concurrency; ++i) {
-		std::vector<CalculationResult> individualResultStorage;
-		for (size_t j = 0; j < _batchSizePerThread; ++j) {
-			individualResultStorage.push_back(std::move(EmptyResult()));
-		}
-		_threadIndividualResultStorage.push_back(std::move(individualResultStorage));
-	}
-
-	for (size_t i = 0; i < _concurrency; ++i) {
-		_threadResults.push_back(std::move(EmptyResult()));
-	}
-
-	for (size_t i = 0; i < _concurrency; ++i) {
-		// create blank thread data
-		ThreadData td;
-		std::vector<double> blankInputLayer(_numInputNodes);
-
-		td._layers = _initializeLikeLayers(blankInputLayer);
-		td._layersLinear = _initializeLikeLayers(blankInputLayer);
-		td._biases = _initializeLikeBiases();
-		td._weights = _initializeLikeWeights();
-		td._errorTerms = _initializeLikeLayers(blankInputLayer);
-		td._weightGrad = _initializeLikeWeights();
-		td._biasGrad = _initializeLikeBiases();
-
-		_threadWorkerData.push_back(std::move(td));
-	}
 
 	for (size_t t = 0; t < _concurrency; ++t) {
 		threads.push_back(std::thread(&Learn::_threadWorkerFunc, this, epochs));
@@ -546,26 +553,6 @@ template <typename T> void Learn<T>::loadLayerConnections()
 	for (const auto &i : _trainingState._testingReport) {
 		std::cout << "Epoch " << i._epoch << "\t Accuracy " << i._accuracy << "\t Cost " << i._cost << std::endl;
 	}
-}
-
-template <typename T> std::string Learn<T>::TrainingExample::toString() const
-{
-	return "Dummy toString function.";
-}
-
-template <typename T> double Learn<T>::TrainingExample::calculateAbsoluteAccuracy(const std::vector<double> &) const
-{
-	return 0.0;
-}
-
-template <typename T> double Learn<T>::TrainingExample::calculateConfidence(const std::vector<double> &) const
-{
-	return 0.0;
-}
-
-template <typename T> T Learn<T>::TrainingExample::interpretOutput(const std::vector<double> &) const
-{
-	// return;
 }
 
 template <typename T>
@@ -607,3 +594,4 @@ template <typename T> size_t Learn<T>::_getThreadIndex() const
 
 template class Learn<std::string>;
 template class Learn<double>;
+template class Learn<unsigned char>;

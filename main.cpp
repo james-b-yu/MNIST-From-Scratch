@@ -4,37 +4,37 @@
 #include <memory>
 
 #include "libs/data_loader/data_loader.h"
-#include "libs/image/image.h"
+#include "libs/image/character.h"
+#include "libs/image/linear.h"
 #include "libs/learn/learn.h"
 
 int main(int, char **)
 {
 	Eigen::initParallel();
-	// extract training examples;
-	std::vector<std::shared_ptr<Learn<double>::TrainingExample>> trainingExamples;
-	std::vector<std::shared_ptr<Learn<double>::TrainingExample>> testingExamples;
 
-	DataLoader trainLoader("./data/train-images.idx3-ubyte", "./data/train-labels.idx1-ubyte");
-	DataLoader testLoader("./data/t10k-images.idx3-ubyte", "./data/t10k-labels.idx1-ubyte");
+	// make a bunch of linear stuff
+	std::vector<std::shared_ptr<Learn<std::string>::TrainingExample>> trainingExamples;
+	std::vector<std::shared_ptr<Learn<std::string>::TrainingExample>> testingExamples;
 
-	for (size_t i = 0; i < 60000; ++i) {
-		trainingExamples.push_back(trainLoader.getImage(i));
-	}
+	for (double m = 0.01; m < 0.5; m += 0.007)
+		for (double x = 0.01; x < 0.5; x += 0.007)
+			for (double c = 0.01; c < 0.5; c += 0.007) {
+				trainingExamples.push_back(std::make_shared<Linear>(m * x + c, m, x, c));
+			}
 
-	for (size_t i = 0; i < 10000; ++i) {
-		testingExamples.push_back(testLoader.getImage(i));
-	}
+	for (double m = 0.5; m < 1; m += 0.010)
+		for (double x = 0.5; x < 1; x += 0.010)
+			for (double c = 0.5; c < 1; c += 0.010) {
+				testingExamples.push_back(std::make_shared<Linear>(m * x + c, m, x, c));
+			}
 
-	Learn<double> l(28 * 28, 3, 512, 10, 0.01, 0.001, 0.8, std::move(trainingExamples), std::move(testingExamples), 2,
-					16, "save-file.txt");
+	// for (int i = 0; i < 10; ++i)
+	// 	trainingExamples.push_back(std::make_shared<Linear>(0.2, 0, 0, 0));
+	// for (int i = 0; i < 10; ++i)
+	// 	testingExamples.push_back(std::make_shared<Linear>(0.2, 0, 0, 0));
 
-	try {
-		l.loadLayerConnections();
-	} catch (...) {
-		l.setRandomLayerConnections();
-	}
-
-	l.train(12);
-	for (size_t i = 0; i < 10; ++i)
-		l.predictIndividual(testLoader.getImage(i));
+	Learn<std::string> l(3, 2, 20, 1, 0.01, 0.01, 0, std::move(trainingExamples), std::move(testingExamples), 2, 16,
+						 "save-file-linear.txt");
+	l.setRandomLayerConnections();
+	l.train(100);
 }
