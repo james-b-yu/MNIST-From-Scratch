@@ -16,6 +16,9 @@ int main(int, char **)
 	std::vector<std::shared_ptr<Learn<std::string>::TrainingExample>> trainingExamples;
 	std::vector<std::shared_ptr<Learn<std::string>::TrainingExample>> testingExamples;
 
+	// make test examples for linear regression of the form y = mx + c
+	// model is fed m x and c, and must figure out the y
+
 	for (double m = 0.01; m < 0.5; m += 0.007)
 		for (double x = 0.01; x < 0.5; x += 0.007)
 			for (double c = 0.01; c < 0.5; c += 0.007) {

@@ -11,7 +11,7 @@ add_library(linear "libs/image/linear.cpp")
 add_library(image_reversed "libs/image/image_reversed.cpp")
 add_library(data_loader "libs/data_loader/data_loader.cpp")
 
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(${PROJECT_NAME} main-letters.cpp)
 
 target_link_libraries(learn pthread boost_iostreams boost_serialization)
 target_link_libraries(image learn)
